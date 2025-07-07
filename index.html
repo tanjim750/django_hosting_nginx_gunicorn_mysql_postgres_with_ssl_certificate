@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🐍 Django Deployment on Ubuntu with PostgreSQL, Gunicorn &amp; Nginx</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            font-size: 16px;
+            line-height: 1.6;
+            background: #ffffff;
+            color: #24292e;
+            padding: 40px;
+            max-width: 960px;
+            margin: auto;
+        }
+    
+        h1, h2, h3 {
+            margin-top: 2em;
+            margin-bottom: 1em;
+            font-weight: 600;
+            border-bottom: 1px solid #eaecef;
+            padding-bottom: 0.3em;
+        }
+    
+        h1 {
+            font-size: 2em;
+        }
+    
+        h2 {
+            font-size: 1.5em;
+        }
+    
+        h3 {
+            font-size: 1.25em;
+        }
+    
+        p {
+            margin: 1em 0;
+        }
+    
+        code {
+            background-color: #f6f8fa;
+            padding: 0.2em 0.4em;
+            margin: 0;
+            font-size: 85%;
+            font-family: SFMono-Regular, Consolas, Liberation Mono, Menlo, monospace;
+            border-radius: 6px;
+        }
+    
+        pre {
+            background-color: #f6f8fa;
+            padding: 1em;
+            overflow: auto;
+            font-size: 85%;
+            line-height: 1.45;
+            border-radius: 6px;
+            margin: 1em 0;
+        }
+    
+        pre code {
+            background: none;
+            padding: 0;
+            margin: 0;
+            border: 0;
+            font-size: 100%;
+            line-height: inherit;
+        }
+    
+        ul {
+            padding-left: 2em;
+            margin-top: 1em;
+        }
+    
+        li {
+            margin-bottom: 0.5em;
+        }
+    
+        a {
+            color: #0366d6;
+            text-decoration: none;
+        }
+    
+        a:hover {
+            text-decoration: underline;
+        }
+    
+        hr {
+            border: 0;
+            border-top: 1px solid #eaecef;
+            margin: 2em 0;
+        }
+    
+        blockquote {
+            padding: 0.5em 1em;
+            margin: 1em 0;
+            border-left: 0.25em solid #dfe2e5;
+            color: #6a737d;
+            background-color: #f6f8fa;
+        }
+    
+        table {
+            border-collapse: collapse;
+            width: 100%;
+        }
+    
+        th, td {
+            border: 1px solid #dfe2e5;
+            padding: 0.6em 1em;
+        }
+    
+        th {
+            background-color: #f6f8fa;
+        }
+    </style>
+    
+</head>
+<hr>
+    <h1>🐍 Django Deployment on Ubuntu with PostgreSQL, Gunicorn &amp; Nginx</h1>
+<p>This guide walks you through deploying a Django project on an Ubuntu server using <strong>PostgreSQL</strong> as the database, <strong>Gunicorn</strong> as the WSGI server, and <strong>Nginx</strong> as the reverse proxy.</p>
+<hr />
+<h2>✅ Prerequisites</h2>
+<ul>
+<li>Ubuntu 22.04 server</li>
+<li>A non-root sudo user</li>
+<li>Firewall configured (e.g., UFW)</li>
+<li>Domain name (optional but recommended)</li>
+</ul>
+<hr />
+<h2>1. 🧱 Install Required Packages</h2>
+<p><code>bash
+sudo apt update
+sudo apt install python3-venv python3-dev libpq-dev postgresql postgresql-contrib nginx curl</code></p>
+<hr />
+<h2>2. 🗄️ Set Up PostgreSQL Database</h2>
+<p><code>bash
+sudo -u postgres psql</code></p>
+<p>Inside the <code>psql</code> prompt:</p>
+<p><code>sql
+CREATE DATABASE myproject;<br>
+CREATE USER myprojectuser WITH PASSWORD 'your_password';<br>
+ALTER ROLE myprojectuser SET client_encoding TO 'utf8';<br>
+ALTER ROLE myprojectuser SET default_transaction_isolation TO 'read committed';<br>
+ALTER ROLE myprojectuser SET timezone TO 'UTC';<br>
+GRANT ALL PRIVILEGES ON DATABASE myproject TO myprojectuser;<br>
+\q</code></p>
+<hr />
+<h2>3. 🔧 Create and Activate Virtual Environment</h2>
+<p><code>bash
+mkdir ~/myproject &amp;&amp; cd ~/myproject
+python3 -m venv .venv
+source .venv/bin/activate</code></p>
+<p>Install required Python packages:</p>
+<p><code>bash
+pip install django gunicorn psycopg2-binary</code></p>
+<hr />
+<h2>4. ⚙️ Start Django Project</h2>
+<p><code>bash
+django-admin startproject myproject .</code></p>
+<p>Edit <code>myproject/settings.py</code>:</p>
+<p>```python
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': 'myproject',
+        'USER': 'myprojectuser',
+        'PASSWORD': 'your_password',
+        'HOST': 'localhost',
+        'PORT': '',
+    }
+}</p>
+<p>ALLOWED_HOSTS = ['your_domain_or_IP']
+```</p>
+<hr />
+<h2>5. 🛠️ Migrate and Create Superuser</h2>
+<p><code>bash
+python manage.py makemigrations
+python manage.py migrate
+python manage.py createsuperuser</code></p>
+<hr />
+<h2>6. 🚀 Test Gunicorn</h2>
+<p><code>bash
+gunicorn --bind 0.0.0.0:8000 myproject.wsgi:application</code></p>
+<p>Visit <code>http://your_server_ip:8000</code> to confirm Django is running.</p>
+<hr />
+<h2>7. ⚙️ Set Up Gunicorn with systemd</h2>
+<p>Create and configure Gunicorn socket:</p>
+<p>```ini</p>
+<h1>/etc/systemd/system/gunicorn.socket</h1>
+<p>[Unit]
+Description=gunicorn socket</p>
+<p>[Socket]
+ListenStream=/run/gunicorn.sock</p>
+<p>[Install]
+WantedBy=sockets.target
+```</p>
+<p>Create and configure Gunicorn service:</p>
+<p>```ini</p>
+<h1>/etc/systemd/system/gunicorn.service</h1>
+<p>[Unit]
+Description=gunicorn daemon
+After=network.target</p>
+<p>[Service]
+User=your_sudo_user
+Group=www-data
+WorkingDirectory=/home/your_sudo_user/myproject
+ExecStart=/home/your_sudo_user/myproject/.venv/bin/gunicorn \
+  --access-logfile - \
+  --workers 3 \
+  --bind unix:/run/gunicorn.sock \
+  myproject.wsgi:application</p>
+<p>[Install]
+WantedBy=multi-user.target
+```</p>
+<p>Start and enable Gunicorn:</p>
+<p><code>bash
+sudo systemctl start gunicorn.socket
+sudo systemctl enable gunicorn.socket</code></p>
+<hr />
+<h2>8. 🌐 Configure Nginx</h2>
+<p>Create a new config file:</p>
+<p>```nginx</p>
+<h1>/etc/nginx/sites-available/myproject</h1>
+<p>server {
+    listen 80;
+    server_name your_domain_or_IP;</p>
+<pre><code>location = /favicon.ico { access_log off; log_not_found off; }
+location /static/ {
+    alias /home/your_sudo_user/myproject/static/;
+}
+
+location / {
+    include proxy_params;
+    proxy_pass http://unix:/run/gunicorn.sock;
+}
+</code></pre>
+<p>}
+```</p>
+<p>Enable the site and test:</p>
+<p><code>bash
+sudo ln -s /etc/nginx/sites-available/myproject /etc/nginx/sites-enabled/
+sudo nginx -t
+sudo systemctl restart nginx
+sudo ufw allow 'Nginx Full'</code></p>
+<hr />
+<h2>9. 🔐 Secure with Let’s Encrypt (Optional)</h2>
+<p>Install Certbot:</p>
+<p><code>bash
+sudo apt install certbot python3-certbot-nginx</code></p>
+<p>Generate and install SSL certificate:</p>
+<p><code>bash
+sudo certbot --nginx -d your_domain</code></p>
+<p>Auto-renew test:</p>
+<p><code>bash
+sudo certbot renew --dry-run</code></p>
+<hr />
+<h2>✅ Final Checks</h2>
+<ul>
+<li>App should be running at <code>http://your_domain_or_ip/</code></li>
+<li>Admin panel available at <code>/admin/</code></li>
+<li>Gunicorn status: <code>sudo systemctl status gunicorn</code></li>
+<li>Nginx error logs: <code>/var/log/nginx/error.log</code></li>
+</ul>
+<hr />
+<h2>🧹 Optional: Collect Static Files</h2>
+<p><code>bash
+python manage.py collectstatic</code></p>
+<p>Make sure to update Nginx <code>location /static/</code> to point to the correct directory.</p>
+<hr />
+<h2>✅ Steps to Install SSL on Django + Gunicorn + Nginx</h2>
+<p>To install SSL (HTTPS) for a Django app running with Gunicorn and Nginx, the easiest and most secure method is to use Let's Encrypt with Certbot.</p>
+<h2>🧱 Prerequisites</h2>
+<ul>
+    <li>A domain name (e.g., zyncops.triizync.com) pointed to your server's IP (A record).</li>
+    <li>Nginx is installed and serving your Django app through Gunicorn.</li>
+    <li>Port 80 is open (needed for Certbot HTTP challenge).</li>
+</ul>
+<hr/>
+<h2>📦 Step 1: Install Certbot and Nginx Plugin</h2>
+<p>For Linux</p>
+<pre>
+    sudo apt update
+    sudo apt install certbot python3-certbot-nginx -y
+</pre>
+<h2>🔍 Step 2: Check Your Nginx Configuration</h2>
+<p>Ensure your Nginx config file has the correct domain and is working.
+<br/> Example config:</p>
+<pre>
+server {
+    listen 80;
+    server_name zyncops.triizync.com;
+
+    location = /favicon.ico { access_log off; log_not_found off; }
+
+    location /static/ {
+        alias /home/ubuntu/zyncops/static/;
+    }
+
+    location / {
+        include proxy_params;
+        proxy_pass http://unix:/home/ubuntu/wplugin-server-django/gunicorn.sock;
+    }
+}
+</pre>
+<p>Check and reload Nginx:</p>
+<pre>
+    sudo nginx -t
+    sudo systemctl reload nginx
+</pre>
+<h2>🔐 Step 3: Obtain SSL Certificate</h2>
+<p>Run this command to automatically get and configure SSL:</p>
+<pre>
+    sudo certbot --nginx -d zyncops.triizync.com
+</pre>
+<p>
+    Certbot will:
+    <ul>
+        <li>Issue an SSL certificate</li>
+        <li>Edit your Nginx config to use HTTPS</li>
+        <li>Reload Nginx</li>
+    </ul>
+If successful, you’ll see: <br>
+Congratulations! You have successfully enabled https://zyncops.triizync.com
+</p>
+<h2>🔁 Step 4: Enable Auto-Renewal (Very Important)</h2>
+<p>Let’s Encrypt certificates expire every 90 days. Set up a cron job:
+<pre>
+    sudo systemctl enable certbot.timer
+    sudo systemctl start certbot.timer
+</pre>
+    Or manually test renewal:
+<pre>
+    sudo certbot renew --dry-run
+</pre>
+</p>
+<h2>✅ Your site is now secure with HTTPS!</h2>
+<p>
+    You can test it at: <br>
+    🔗 https://zyncops.triizync.com
+</p>
+<h1>🛡️ Periodic MySQL Backup to Google Drive using rclone & Cron</h1>
+
+  <p>This guide explains how to automate MySQL database backups and upload them to Google Drive using <code>rclone</code> and <code>cron</code>.</p>
+
+  <hr />
+
+  <h2>📦 Requirements</h2>
+  <ul>
+    <li>Linux server with <code>cron</code> installed</li>
+    <li><code>mysqldump</code> command (comes with MySQL)</li>
+    <li><code>rclone</code> installed and configured for Google Drive</li>
+  </ul>
+
+  <hr />
+
+  <h2>⚙️ Step 1: Install & Configure rclone</h2>
+  <pre><code>sudo apt install rclone</code></pre>
+  <pre><code>
+    ┌──(tanjim㉿kali)-[~]
+    └─$ rclone config           
+    2025/06/27 17:34:15 NOTICE: Config file "/home/tanjim/.config/rclone/rclone.conf" not found - using defaults
+    No remotes found, make a new one?
+    n) New remote
+    s) Set configuration password
+    q) Quit config
+    n/s/q> n
+
+    Enter name for new remote.
+    name> zyncops_db
+
+    Option Storage.
+    Type of storage to configure.
+    Choose a number from below, or type in your own value.
+    18 / Google Drive
+    \ (drive)
+    19 / Google Photos
+    \ (google photos)
+    Storage> 18
+
+    Option client_id.
+    Google Application Client Id
+    Setting your own is recommended.
+    See https://rclone.org/drive/#making-your-own-client-id for how to create your own.
+    If you leave this blank, it will use an internal key which is low performance.
+    Enter a value. Press Enter to leave empty.
+    client_id> 
+
+    Option client_secret.
+    OAuth Client Secret.
+    Leave blank normally.
+    Enter a value. Press Enter to leave empty.
+    client_secret> 
+
+    Option scope.
+    Scope that rclone should use when requesting access from drive.
+    Choose a number from below, or type in your own value.
+    Press Enter to leave empty.
+    1 / Full access all files, excluding Application Data Folder.
+    \ (drive)
+    scope> 1
+
+    Option service_account_file.
+    Service Account Credentials JSON file path.
+    Leave blank normally.
+    Needed only if you want use SA instead of interactive login.
+    Leading `~` will be expanded in the file name as will environment variables such as `${RCLONE_CONFIG_DIR}`.
+    Enter a value. Press Enter to leave empty.
+    service_account_file> 
+
+    Edit advanced config?
+    y) Yes
+    n) No (default)
+    y/n> n
+
+    Use auto config?
+    * Say Y if not sure
+    * Say N if you are working on a remote or headless machine
+
+    y) Yes (default)
+    n) No
+    y/n> n
+
+    Option config_token.
+    For this to work, you will need rclone available on a machine that has
+    a web browser available.
+    For more help and alternate methods see: https://rclone.org/remote_setup/
+    Execute the following on the machine with the web browser (same rclone
+    version recommended):
+        rclone authorize "drive" "eyJzY29wZSI6ImRyaXZlIn0"
+    Then paste the result.
+    Enter a value.
+    config_token> 
+
+
+  </code></pre>
+  <p>During <code>rclone config</code>, follow prompts to set up a remote (e.g. name it <code>zyncops_db</code>) linked to your Google account.</p>
+
+  <h2>🔐 Step 1: Authorize rclone for Remote Use</h2>
+  <p>If your remote server doesn't have a browser or GUI, authorize rclone from your local machine:</p>
+
+  <h3>🖥️ On Remote Server:</h3>
+  <pre><code>rclone authorize "drive" "eyJzY29wZSI6ImRyaXZlIn0"</code></pre>
+
+  <p>This authorizes rclone to access your Google Drive without needing a browser on the server.</p>
+  <p>This will output a long token like: <pre>
+<code>eyJ0b2tlbiI6IntcImFjY2Vzc190b2tlblwiOlwieWEyOS5hMEFTM0g2TndPVFBFdGZ3OTlET1FPSXVMYlYzV0ZwVXlIaHQ3VXI0LU
+dzU2VlSWg4UG5HdXppZDJhREJmTnc1UEVreXFVR25YbU1xVG1Rb2Q4dW5IWVc4U0dpQTlfdm0zNVEwOTBKS3F1T3lFVEtTbXUtWDcxQ2gxRW
+VSbTVJNFJ4MEUwZ2dSVHhyOGYtNllJeUI3eDVDMjlpdEM3b0ZZX0JNTDIxUmFDZ1lLQVhJU0FSQVNGUUhHWDJNaVNJRXdpRU56aFJRVlh0Ym
+tCaGcwMTc1XCIsXCJ0b2tlbl90eXBlXCI6XCJCZWFyZXJcIixcInJlZnJlc2hfdG9rZW5cIjpcIjEc1ZMdmZMb2FaenoxVTh3pCVUI32hbsw
+vLzBnSUhJdHdzZHkzSVBDZ1lJQVJBQUdCQVNOd0YtTDlJckxmbUN1YUMxMFFJc3N5a0MyRyeVwiOlwiMjAyNS0wNi0yN1QxNzowNDo0OS4yO
+Sek5SOG5ibG9WQWJKSjdyM2g0aGpyXzE3dFZ6S2tcIixcImV4cGl</code>
+</pre></p>
+  <p>Now go to remote machine and paste the config token and done.</p>
+  <hr />
+
+  <h2>🗃️ Step 2: Create Backup Script</h2>
+  <p>Save the following as <code>backup_mysql.sh</code>:</p>
+  <pre><code>
+    #!/bin/bash
+
+    # Variables
+    BACKUP_DIR=/home/db_backups
+    DATE=$(date +'%Y-%m-%d_%H-%M-%S')
+    SQL_BACKUP_FILE=$BACKUP_DIR/zyncops_sql_backup_$DATE.sql
+    DJANGO_BACKUP_FILE=$BACKUP_DIR/zyncops_django_backup_$DATE.json
+    RCLONE_REMOTE=zyncops_db:backup_folder # zyncops_db is rclone remote name and backup_folder is gdrive folder name 
+    
+    # Make sure backup directory exists
+    mkdir -p $BACKUP_DIR
+    
+    # Dump MySQL database (replace user and password accordingly)
+    mysqldump -u zyncops -p'triZync@2025' --no-tablespaces zyncops > $SQL_BACKUP_FILE
+    #dump django
+    python3 /home/djangoproject/manage.py dumpdata > $DJANGO_BACKUP_FILE 
+     
+    # Upload to Google Drive folder using rclone
+    rclone copy $SQL_BACKUP_FILE $RCLONE_REMOTE
+    rclone copy $DJANGO_BACKUP_FILE $RCLONE_REMOTE
+    
+    # Optional: remove local backup files older than 7 days
+    find $SQL_BACKUP_DIR -type f -mtime +7 -name "*.sql" -delete
+    find $DJANGO_BACKUP_DIR -type f -mtime +7 -name "*.json" -delete
+    
+</code></pre>
+
+  <p>Make it executable:</p>
+  <pre><code>chmod +x backup_mysql.sh</code></pre>
+
+  <hr />
+
+  <h2>⏰ Step 3: Schedule with Crontab</h2>
+  <p>Edit the crontab:</p>
+  <pre><code>crontab -e</code></pre>
+  <p>Add this line to run the backup every 6 hours:</p>
+  <pre><code>
+#daily 12am
+0 0 * * * /home/ubuntu/backup_mysql.sh >> /home/ubuntu/backup.log 2>&1
+#every two min
+#*/2 * * * * /home/ubuntu/backup_mysql.sh >> /home/ubuntu/backup.log 2>&1
+#every 6 hours
+#0 */6 * * * /home/ubuntu/backup_mysql.sh >> /home/ubuntu/backup.log 2>&1
+    </code></pre>
+  <pre><code>0 */6 * * * /home/ubuntu/backup_mysql.sh</code></pre>
+
+  <p>Crontab breakdown:</p>
+  <ul>
+    <li><code>0</code> – minute</li>
+    <li><code>*/6</code> – every 6 hours</li>
+    <li><code>*</code> – every day/month/day of week</li>
+    <li><code>/home/ubuntu/backup_mysql.sh</code> – Execution file path</li>
+  </ul>
+
+  <hr />
+
+  <h2>✅ Tips</h2>
+  <ul>
+    <li>Use environment variables or secrets for passwords</li>
+    <li>Monitor cron logs via <code>grep CRON /var/log/syslog</code></li>
+    <li>Test your rclone setup with <code>rclone ls gdrive:/</code></li>
+  </ul>
+
+  <hr />
+
+  <h2>📚 References</h2>
+  <ul>
+    <li><a href="https://rclone.org/">rclone.org</a></li>
+    <li><a href="https://crontab.guru/">crontab.guru</a></li>
+  </ul>
+  <hr />
+
+  <h2>⚙️ Server Optimization: Swap & Gunicorn Workers</h2>
+  
+  <h3>🧠 Create & Enable 2GB Swap on Ubuntu</h3>
+  <p>Swap helps prevent out-of-memory crashes on low-RAM servers. Here's how to create a 2GB swap file:</p>
+  <pre><code>sudo fallocate -l 2G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+  </code></pre>
+  
+  <h4>✅ Verify it’s active:</h4>
+  <pre><code>free -h
+swapon --show
+  </code></pre>
+  
+  <h4>🔄 Check & Set Swappiness (swap aggressiveness):</h4>
+  <pre><code>cat /proc/sys/vm/swappiness
+sudo sysctl vm.swappiness=10
+echo 'vm.swappiness=10' | sudo tee -a /etc/sysctl.conf
+  </code></pre>
+  
+  <p><strong>Recommended:</strong> Set <code>swappiness</code> to <code>10</code> on small servers to avoid excessive swapping.</p>
+  
+  <hr />
+  
+  <h3>🚀 Optimize Gunicorn Workers</h3>
+  <p>Gunicorn performance depends on the number of workers. A good formula:</p>
+  <pre><code>workers = 2 * CPU_cores + 1</code></pre>
+  
+  <h4>🛠 Example for a 2-core server:</h4>
+  <pre><code>ExecStart=/home/your_user/myproject/.venv/bin/gunicorn \
+    --workers 5 \
+    --bind unix:/run/gunicorn.sock \
+    myproject.wsgi:application
+  </code></pre>
+  
+  <p>You can find CPU cores with:</p>
+  <pre><code>nproc</code></pre>
+  
+  <p><strong>Tip:</strong> Monitor memory usage and request load to tune <code>workers</code> and <code>threads</code> accordingly.</p>
+<h2>Test server load</h2>
+<p>Estimating how many concurrent users your server can handle involves testing and observing a few key things:</p>
+<h3>✅ Key Factors That Affect Concurrent User Capacity</h3>
+<ul>
+    <li>🧠 Available memory (RAM + swap)</li>
+    <li>⚙️ Number of Gunicorn workers (each handles 1 request at a time)</li>
+    <li>🕒 Average request time (response latency)</li>
+    <li>🧰 Backend logic load — e.g. DB queries, ML models, file uploads</li>
+    <li>🌐 Network bandwidth and Nginx buffering</li>
+    <li> 🔁 Asynchronous vs synchronous views (Gunicorn is synchronous by default)</li>
+</ul>
+<h3>🚀 Practical Way to Measure It: Load Testing</h3>
+<p>Use locust (Python-based load tester)</p>
+<pre><code>
+    from locust import HttpUser, task, between
+    
+    class MyAppUser(HttpUser):
+        wait_time = between(1, 3)
+    
+        @task
+        def index(self):
+            self.client.get("/")
+    
+</code></pre>
+<h3>Install and run</h3>
+<p><code>pip install locust</code></p>
+<p>To run make file called locustfile.py type <code>locust</code> in teminal </p>
+<h2>📚 References</h2>
+<p>Based on the DigitalOcean tutorial:<br />
+<strong>How To Set Up Django with Postgres, Nginx, and Gunicorn on Ubuntu</strong><br />
+<a href="https://www.digitalocean.com/community/tutorials/how-to-set-up-django-with-postgres-nginx-and-gunicorn-on-ubuntu">Link</a></p>
+</body>
+</html>
